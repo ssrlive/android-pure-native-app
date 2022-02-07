@@ -16,13 +16,12 @@
  */
 
 //BEGIN_INCLUDE(all)
-#include <initializer_list>
-#include <memory>
-#include <cstdlib>
-#include <cstring>
+#include <memory.h>
+#include <stdlib.h>
+#include <string.h>
 #include <jni.h>
-#include <cerrno>
-#include <cassert>
+#include <errno.h>
+#include <assert.h>
 
 #include <EGL/egl.h>
 #include <GLES/gl.h>
@@ -31,8 +30,8 @@
 #include <android/log.h>
 #include <android_native_app_glue.h>
 
-#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "native-activity", __VA_ARGS__))
-#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, "native-activity", __VA_ARGS__))
+#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "NativeDemoInfo", __VA_ARGS__))
+#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, "NativeDemoInfo", __VA_ARGS__))
 
 /**
  * Our saved state data.
@@ -81,26 +80,26 @@ static int engine_init_display(struct engine* engine) {
             EGL_NONE
     };
     EGLint w, h, format;
-    EGLint numConfigs;
-    EGLConfig config = nullptr;
+    EGLint numConfigs = 0;
+    EGLConfig config = NULL;
     EGLSurface surface;
     EGLContext context;
 
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
-    eglInitialize(display, nullptr, nullptr);
+    eglInitialize(display, NULL, NULL);
 
     /* Here, the application chooses the configuration it desires.
      * find the best match if possible, otherwise use the very first one
      */
-    eglChooseConfig(display, attribs, nullptr,0, &numConfigs);
-    std::unique_ptr<EGLConfig[]> supportedConfigs(new EGLConfig[numConfigs]);
-    assert(supportedConfigs);
-    eglChooseConfig(display, attribs, supportedConfigs.get(), numConfigs, &numConfigs);
+    eglChooseConfig(display, attribs, NULL,0, &numConfigs);
     assert(numConfigs);
-    auto i = 0;
+    EGLConfig *supportedConfigs = (EGLConfig*) calloc(numConfigs, sizeof(EGLConfig));
+    assert(supportedConfigs);
+    eglChooseConfig(display, attribs, supportedConfigs, numConfigs, &numConfigs);
+    int i = 0;
     for (; i < numConfigs; i++) {
-        auto& cfg = supportedConfigs[i];
+        EGLConfig cfg = supportedConfigs[i];
         EGLint r, g, b, d;
         if (eglGetConfigAttrib(display, cfg, EGL_RED_SIZE, &r)   &&
             eglGetConfigAttrib(display, cfg, EGL_GREEN_SIZE, &g) &&
@@ -116,8 +115,9 @@ static int engine_init_display(struct engine* engine) {
         config = supportedConfigs[0];
     }
 
-    if (config == nullptr) {
+    if (config == NULL) {
         LOGW("Unable to initialize EGLConfig");
+        free(supportedConfigs);
         return -1;
     }
 
@@ -126,11 +126,12 @@ static int engine_init_display(struct engine* engine) {
      * As soon as we picked a EGLConfig, we can safely reconfigure the
      * ANativeWindow buffers to match, using EGL_NATIVE_VISUAL_ID. */
     eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
-    surface = eglCreateWindowSurface(display, config, engine->app->window, nullptr);
-    context = eglCreateContext(display, config, nullptr, nullptr);
+    surface = eglCreateWindowSurface(display, config, engine->app->window, NULL);
+    context = eglCreateContext(display, config, NULL, NULL);
 
     if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE) {
         LOGW("Unable to eglMakeCurrent");
+        free(supportedConfigs);
         return -1;
     }
 
@@ -145,9 +146,10 @@ static int engine_init_display(struct engine* engine) {
     engine->state.angle = 0;
 
     // Check openGL on the system
-    auto opengl_info = {GL_VENDOR, GL_RENDERER, GL_VERSION, GL_EXTENSIONS};
-    for (auto name : opengl_info) {
-        auto info = glGetString(name);
+    GLenum opengl_info[] = {GL_VENDOR, GL_RENDERER, GL_VERSION, GL_EXTENSIONS};
+    for (i = 0; i < sizeof(opengl_info) / sizeof(opengl_info[0]); ++i) {
+        GLenum name = opengl_info[i];
+        const GLubyte *info = glGetString(name);
         LOGI("OpenGL Info: %s", info);
     }
     // Initialize GL state.
@@ -156,6 +158,7 @@ static int engine_init_display(struct engine* engine) {
     glShadeModel(GL_SMOOTH);
     glDisable(GL_DEPTH_TEST);
 
+    free(supportedConfigs);
     return 0;
 }
 
@@ -163,14 +166,14 @@ static int engine_init_display(struct engine* engine) {
  * Just the current frame in the display.
  */
 static void engine_draw_frame(struct engine* engine) {
-    if (engine->display == nullptr) {
+    if (engine->display == NULL) {
         // No display.
         return;
     }
 
     // Just fill the screen with a color.
-    glClearColor(((float)engine->state.x)/engine->width, engine->state.angle,
-                 ((float)engine->state.y)/engine->height, 1);
+    glClearColor(((float)engine->state.x)/(float)engine->width, engine->state.angle,
+                 ((float)engine->state.y)/(float)engine->height, 1);
     glClear(GL_COLOR_BUFFER_BIT);
 
     eglSwapBuffers(engine->display, engine->surface);
@@ -200,7 +203,7 @@ static void engine_term_display(struct engine* engine) {
  * Process the next input event.
  */
 static int32_t engine_handle_input(struct android_app* app, AInputEvent* event) {
-    auto* engine = (struct engine*)app->userData;
+    struct engine* engine = (struct engine*)app->userData;
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION) {
         engine->animating = 1;
         engine->state.x = AMotionEvent_getX(event, 0);
@@ -214,7 +217,7 @@ static int32_t engine_handle_input(struct android_app* app, AInputEvent* event) 
  * Process the next main command.
  */
 static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
-    auto* engine = (struct engine*)app->userData;
+    struct engine* engine = (struct engine*)app->userData;
     switch (cmd) {
         case APP_CMD_SAVE_STATE:
             // The system has asked us to save our current state.  Do so.
@@ -224,7 +227,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
             break;
         case APP_CMD_INIT_WINDOW:
             // The window is being shown, get it ready.
-            if (engine->app->window != nullptr) {
+            if (engine->app->window != NULL) {
                 engine_init_display(engine);
                 engine_draw_frame(engine);
             }
@@ -235,7 +238,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
             break;
         case APP_CMD_GAINED_FOCUS:
             // When our app gains focus, we start monitoring the accelerometer.
-            if (engine->accelerometerSensor != nullptr) {
+            if (engine->accelerometerSensor != NULL) {
                 ASensorEventQueue_enableSensor(engine->sensorEventQueue,
                                                engine->accelerometerSensor);
                 // We'd like to get 60 events per second (in us).
@@ -247,7 +250,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
         case APP_CMD_LOST_FOCUS:
             // When our app loses focus, we stop monitoring the accelerometer.
             // This is to avoid consuming battery while not being used.
-            if (engine->accelerometerSensor != nullptr) {
+            if (engine->accelerometerSensor != NULL) {
                 ASensorEventQueue_disableSensor(engine->sensorEventQueue,
                                                 engine->accelerometerSensor);
             }
@@ -266,30 +269,30 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
  *    for Android-N and before, when compiling with NDK-r15
  */
 #include <dlfcn.h>
-ASensorManager* AcquireASensorManagerInstance(android_app* app) {
+ASensorManager* AcquireASensorManagerInstance(struct android_app* app) {
 
   if(!app)
-    return nullptr;
+    return NULL;
 
   typedef ASensorManager *(*PF_GETINSTANCEFORPACKAGE)(const char *name);
   void* androidHandle = dlopen("libandroid.so", RTLD_NOW);
-  auto getInstanceForPackageFunc = (PF_GETINSTANCEFORPACKAGE)
+    PF_GETINSTANCEFORPACKAGE getInstanceForPackageFunc = (PF_GETINSTANCEFORPACKAGE)
       dlsym(androidHandle, "ASensorManager_getInstanceForPackage");
   if (getInstanceForPackageFunc) {
-    JNIEnv* env = nullptr;
-    app->activity->vm->AttachCurrentThread(&env, nullptr);
+    JNIEnv* env = NULL;
+    (*(app->activity->vm))->AttachCurrentThread(app->activity->vm, &env, NULL);
 
-    jclass android_content_Context = env->GetObjectClass(app->activity->clazz);
-    jmethodID midGetPackageName = env->GetMethodID(android_content_Context,
+    jclass android_content_Context = (*env)->GetObjectClass(env, app->activity->clazz);
+    jmethodID midGetPackageName = (*env)->GetMethodID(env, android_content_Context,
                                                    "getPackageName",
                                                    "()Ljava/lang/String;");
-    auto packageName= (jstring)env->CallObjectMethod(app->activity->clazz,
+    jstring packageName= (jstring)(*env)->CallObjectMethod(env, app->activity->clazz,
                                                         midGetPackageName);
 
-    const char *nativePackageName = env->GetStringUTFChars(packageName, nullptr);
+    const char *nativePackageName = (*env)->GetStringUTFChars(env, packageName, NULL);
     ASensorManager* mgr = getInstanceForPackageFunc(nativePackageName);
-    env->ReleaseStringUTFChars(packageName, nativePackageName);
-    app->activity->vm->DetachCurrentThread();
+    (*env)->ReleaseStringUTFChars(env, packageName, nativePackageName);
+    (*(app->activity->vm))->DetachCurrentThread(app->activity->vm);
     if (mgr) {
       dlclose(androidHandle);
       return mgr;
@@ -297,7 +300,7 @@ ASensorManager* AcquireASensorManagerInstance(android_app* app) {
   }
 
   typedef ASensorManager *(*PF_GETINSTANCE)();
-  auto getInstanceFunc = (PF_GETINSTANCE)
+  PF_GETINSTANCE getInstanceFunc = (PF_GETINSTANCE)
       dlsym(androidHandle, "ASensorManager_getInstance");
   // by all means at this point, ASensorManager_getInstance should be available
   assert(getInstanceFunc);
@@ -313,7 +316,7 @@ ASensorManager* AcquireASensorManagerInstance(android_app* app) {
  * event loop for receiving input events and doing other things.
  */
 void android_main(struct android_app* state) {
-    struct engine engine{};
+    struct engine engine = { 0 };
 
     memset(&engine, 0, sizeof(engine));
     state->userData = &engine;
@@ -329,9 +332,9 @@ void android_main(struct android_app* state) {
     engine.sensorEventQueue = ASensorManager_createEventQueue(
                                     engine.sensorManager,
                                     state->looper, LOOPER_ID_USER,
-                                    nullptr, nullptr);
+                                    NULL, NULL);
 
-    if (state->savedState != nullptr) {
+    if (state->savedState != NULL) {
         // We are starting with a previous saved state; restore from it.
         engine.state = *(struct saved_state*)state->savedState;
     }
@@ -347,17 +350,17 @@ void android_main(struct android_app* state) {
         // If not animating, we will block forever waiting for events.
         // If animating, we loop until all events are read, then continue
         // to draw the next frame of animation.
-        while ((ident=ALooper_pollAll(engine.animating ? 0 : -1, nullptr, &events,
+        while ((ident=ALooper_pollAll(engine.animating ? 0 : -1, NULL, &events,
                                       (void**)&source)) >= 0) {
 
             // Process this event.
-            if (source != nullptr) {
+            if (source != NULL) {
                 source->process(state, source);
             }
 
             // If a sensor has data, process it now.
             if (ident == LOOPER_ID_USER) {
-                if (engine.accelerometerSensor != nullptr) {
+                if (engine.accelerometerSensor != NULL) {
                     ASensorEvent event;
                     while (ASensorEventQueue_getEvents(engine.sensorEventQueue,
                                                        &event, 1) > 0) {
