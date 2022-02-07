@@ -15,6 +15,8 @@ add_library(nativedemo
     ${SOURCE_DIR}/main.c
     )
 
+# Export ANativeActivity_onCreate(),
+# Refer to: https://github.com/android-ndk/ndk/issues/381.
 set(CMAKE_SHARED_LINKER_FLAGS
         "${CMAKE_SHARED_LINKER_FLAGS} -u ANativeActivity_onCreate")
 
